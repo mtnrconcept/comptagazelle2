@@ -56,7 +56,10 @@ const InvoiceSchema = z.object({
   iban: z.string().describe('IBAN du bénéficiaire avec espaces (ex: CH93 0076 2011 6238 5295 7), ou chaîne vide'),
   paymentTerms: z.string().describe('Conditions de paiement (ex: 30 jours net, payable immédiatement)'),
   category: z.string().describe('Catégorie comptable la plus probable parmi : Matériel, Services, Loyer, Assurance, Télécom, Transport, Restauration, Fournitures, Sous-traitance, Formation, Santé / Médical, Énergie, Nettoyage, Autres charges'),
-  tvaRate: z.number().describe('Taux de TVA en pourcentage (ex: 8.1 pour la Suisse, 20 pour la France). 0 si non trouvé.'),
+  tvaRate: z.number().describe('Taux de TVA en pourcentage (ex: 8.1, 2.6, 3.8 pour la Suisse). 0 si exonéré, hors champ ou non trouvé.'),
+  vatCode: z.enum(['standard', 'reduced', 'hotel', 'exempt', 'out_of_scope', 'unknown']).describe('Code TVA: standard=8.1%, reduced=2.6%, hotel=3.8%, exempt=exonéré, out_of_scope=hors champ, unknown=incertain'),
+  vatDeductibleAmount: z.number().describe('Montant de TVA déductible/récupérable. Pour une facture fournisseur suisse taxable, égal au montant TVA; 0 si exonéré, hors champ ou non déductible.'),
+  vatCountry: z.string().describe('Pays TVA au format ISO 2 lettres (ex: CH, FR), ou chaîne vide si inconnu'),
   referenceNumber: z.string().describe('Numéro de référence QR / BVR si présent, sinon chaîne vide'),
 });
 
@@ -104,8 +107,15 @@ RÈGLES CRITIQUES:
    - Format suisse: CH + 2 chiffres + 4×4 chiffres + 1 chiffre
    - Format français: FR + 2 chiffres + 5×4 chiffres + 3 chiffres
    
-5. TVA SUISSE: Taux courants = 8.1% (normal), 2.6% (réduit), 3.8% (hébergement)
-   TVA FRANÇAISE: 20% (normal), 10% (intermédiaire), 5.5% (réduit)
+5. TVA SUISSE: Taux courants = 8.1% (normal), 2.6% (réduit), 3.8% (hébergement).
+   - Mapper 8.1% vers vatCode="standard"
+   - Mapper 2.6% vers vatCode="reduced"
+   - Mapper 3.8% vers vatCode="hotel"
+   - Si la facture indique exonéré / exempt / TVA 0% avec opération imposable: vatCode="exempt"
+   - Si la facture est hors champ / non soumis / étranger non suisse: vatCode="out_of_scope"
+   - Si incertain: vatCode="unknown"
+   - Pour une facture fournisseur suisse taxable, vatDeductibleAmount = montant TVA; sinon 0.
+   TVA FRANÇAISE: 20% (normal), 10% (intermédiaire), 5.5% (réduit), avec vatCountry="FR".
 
 6. FOURNISSEUR: Prendre le nom commercial principal (pas l'adresse, pas le IBAN).
 

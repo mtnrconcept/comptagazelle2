@@ -1,25 +1,37 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { useStore } from '../store';
-import { Upload, FileText, CheckCircle, AlertCircle, Eye, Zap, Settings2, Image as ImageIcon, Brain, Camera, X } from 'lucide-react';
-import { Invoice } from '../types';
-import { OCRResult, defaultPreprocessingOptions, PreprocessingOptions } from '../utils/ocrEngine';
-import { AIVisionOCRResult, VISION_MODELS, VisionModelId } from '../utils/aiVisionOCR';
-import { capturePhoto, dataURLToFile, isInWebView, requestCamera, takePhotoWithNativeCamera } from '../utils/mobileFeatures';
-import {
-  AIVisionDocumentOCRResult,
-  detectDocumentMimeType,
-  DocumentPageImage,
-  prepareDocumentPages,
-  runDocumentAIVisionOCR,
-  runDocumentOCR,
-  TesseractDocumentOCRResult,
-  unsupportedDocumentMessage,
-} from '../utils/documentOCR';
+import { Upload, FileText, CheckCircle, AlertCircle, Eye, Zap, Settings2, Image as ImageIcon, Brain } from 'lucide-react';
+import { Invoice, VATCode } from '../types';
+import { runOCR, OCRResult, defaultPreprocessingOptions, PreprocessingOptions } from '../utils/ocrEngine';
+import { runAIVisionOCR, AIVisionOCRResult, VISION_MODELS, VisionModelId } from '../utils/aiVisionOCR';
 
 type OCRMethod = 'ai-vision' | 'tesseract';
 type DocumentKind = 'image' | 'pdf';
 
 const ACCEPTED_DOCUMENT_TYPES = '.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff,.pdf,image/*,application/pdf';
+
+const SWISS_VAT_RATES = [8.1, 2.6, 3.8] as const;
+
+function parseNumber(value: string | number | undefined): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (!value) return 0;
+  const parsed = parseFloat(value.replace(',', '.'));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function inferSwissVatCode(rate: number, tva: number): VATCode {
+  if (Math.abs(rate - 8.1) < 0.05) return 'standard';
+  if (Math.abs(rate - 2.6) < 0.05) return 'reduced';
+  if (Math.abs(rate - 3.8) < 0.05) return 'hotel';
+  if (rate === 0 && tva === 0) return 'exempt';
+  return 'unknown';
+}
+
+function inferVatRate(amountHT: number, tva: number): number {
+  if (!amountHT || !tva) return 0;
+  const computedRate = (tva / amountHT) * 100;
+  return SWISS_VAT_RATES.find(rate => Math.abs(rate - computedRate) < 0.15) ?? Number(computedRate.toFixed(2));
+}
 
 export default function InvoiceScan() {
   const { saveInvoiceAccountingFlow, categories } = useStore();
@@ -198,20 +210,64 @@ export default function InvoiceScan() {
         setTesseractDocumentResult(null);
         setAiResult(documentResult.aggregated);
         setOcrResult(null);
-        setBestPageNumber(documentResult.bestPageNumber);
-        setScannedData(mapParsedInvoiceToScannedData(documentResult.aggregated.parsedInvoice));
+
+        const parsed = result.parsedInvoice;
+        setScannedData({
+          supplier: parsed.supplier || '',
+          invoiceNumber: parsed.invoiceNumber || '',
+          date: parsed.date || new Date().toISOString().split('T')[0],
+          dueDate: parsed.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          amountHT: parsed.amountHT || 0,
+          tva: parsed.tva || 0,
+          amountTTC: parsed.amountTTC || 0,
+          currency: parsed.currency || 'CHF',
+          category: parsed.category || 'Autres charges',
+          status: 'pending',
+          iban: parsed.iban || '',
+          paymentTerms: parsed.paymentTerms || '30 jours net',
+          tvaRate: parsed.tvaRate || inferVatRate(parsed.amountHT || 0, parsed.tva || 0),
+          vatCode: parsed.vatCode || inferSwissVatCode(parsed.tvaRate || 0, parsed.tva || 0),
+          vatDeductibleAmount: parsed.vatDeductibleAmount ?? parsed.tva ?? 0,
+          vatCountry: parsed.vatCountry || 'CH',
+          referenceNumber: parsed.referenceNumber || '',
+          vatValidationStatus: 'to_review',
+        });
       } else {
         const documentResult = await runDocumentOCR(pages, (p, status) => {
           setProgress(p);
           setProgressStatus(status);
         }, preprocessOptions);
 
-        setTesseractDocumentResult(documentResult);
-        setAiDocumentResult(null);
-        setOcrResult(documentResult.aggregated);
-        setAiResult(null);
-        setBestPageNumber(documentResult.bestPageNumber);
-        setScannedData(mapParsedInvoiceToScannedData(documentResult.aggregated.parsedInvoice));
+        const parsed = result.parsedInvoice;
+        let amountTTC = parsed.amountTTC;
+        if (!amountTTC && parsed.amountHT) {
+          amountTTC = parsed.amountHT + parsed.tva;
+        }
+        let tva = parsed.tva;
+        if (!tva && amountTTC && parsed.amountHT) {
+          tva = amountTTC - parsed.amountHT;
+        }
+
+        setScannedData({
+          supplier: parsed.supplier || '',
+          invoiceNumber: parsed.invoiceNumber || '',
+          date: parsed.date || new Date().toISOString().split('T')[0],
+          dueDate: parsed.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+          amountHT: parsed.amountHT || 0,
+          tva: tva || 0,
+          amountTTC: amountTTC || 0,
+          currency: parsed.currency || 'CHF',
+          category: parsed.category || 'Autres charges',
+          status: 'pending',
+          iban: parsed.iban || '',
+          paymentTerms: parsed.paymentTerms || '30 jours net',
+          tvaRate: inferVatRate(parsed.amountHT || 0, tva || 0),
+          vatCode: inferSwissVatCode(inferVatRate(parsed.amountHT || 0, tva || 0), tva || 0),
+          vatDeductibleAmount: tva || 0,
+          vatCountry: 'CH',
+          referenceNumber: '',
+          vatValidationStatus: 'to_review',
+        });
       }
     } catch (err) {
       console.error('Scan error:', err);
@@ -232,6 +288,12 @@ export default function InvoiceScan() {
         status: 'pending',
         iban: '',
         paymentTerms: '30 jours net',
+        tvaRate: 0,
+        vatCode: 'unknown',
+        vatDeductibleAmount: 0,
+        vatCountry: 'CH',
+        referenceNumber: '',
+        vatValidationStatus: 'draft',
       });
     } finally {
       setScanning(false);
@@ -246,15 +308,21 @@ export default function InvoiceScan() {
       invoiceNumber: scannedData.invoiceNumber || '',
       date: scannedData.date || '',
       dueDate: scannedData.dueDate || '',
-      amountHT: typeof scannedData.amountHT === 'string' ? parseFloat(scannedData.amountHT) : (scannedData.amountHT || 0),
-      tva: typeof scannedData.tva === 'string' ? parseFloat(scannedData.tva) : (scannedData.tva || 0),
-      amountTTC: typeof scannedData.amountTTC === 'string' ? parseFloat(scannedData.amountTTC) : (scannedData.amountTTC || 0),
+      amountHT: parseNumber(scannedData.amountHT),
+      tva: parseNumber(scannedData.tva),
+      amountTTC: parseNumber(scannedData.amountTTC),
       currency: scannedData.currency || 'CHF',
       category: scannedData.category || 'Autres charges',
       status: 'pending',
       fileName: file?.name,
       iban: scannedData.iban,
       paymentTerms: scannedData.paymentTerms,
+      tvaRate: parseNumber(scannedData.tvaRate) || inferVatRate(parseNumber(scannedData.amountHT), parseNumber(scannedData.tva)),
+      vatCode: scannedData.vatCode || inferSwissVatCode(parseNumber(scannedData.tvaRate), parseNumber(scannedData.tva)),
+      vatDeductibleAmount: parseNumber(scannedData.vatDeductibleAmount) || parseNumber(scannedData.tva),
+      vatCountry: scannedData.vatCountry || 'CH',
+      referenceNumber: scannedData.referenceNumber || '',
+      vatValidationStatus: scannedData.vatValidationStatus || 'to_review',
     };
     saveInvoiceAccountingFlow({ invoice, categoryName: invoice.category });
     setScannedData((prev) => prev ? { ...prev, category: invoice.category } : prev);
@@ -772,9 +840,13 @@ export default function InvoiceScan() {
               { label: 'Échéance', field: 'dueDate', value: scannedData.dueDate },
               { label: 'Montant HT', field: 'amountHT', value: scannedData.amountHT?.toString() },
               { label: 'TVA', field: 'tva', value: scannedData.tva?.toString() },
+              { label: 'Taux TVA', field: 'tvaRate', value: scannedData.tvaRate?.toString() },
               { label: 'Montant TTC', field: 'amountTTC', value: scannedData.amountTTC?.toString() },
               { label: 'Devise', field: 'currency', value: scannedData.currency },
               { label: 'IBAN', field: 'iban', value: scannedData.iban },
+              { label: 'Référence QR/BVR', field: 'referenceNumber', value: scannedData.referenceNumber },
+              { label: 'TVA déductible', field: 'vatDeductibleAmount', value: scannedData.vatDeductibleAmount?.toString() },
+              { label: 'Pays TVA', field: 'vatCountry', value: scannedData.vatCountry },
               { label: 'Conditions', field: 'paymentTerms', value: scannedData.paymentTerms },
             ].map((item) => (
               <div key={item.field}>
