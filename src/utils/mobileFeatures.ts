@@ -279,3 +279,54 @@ export const hapticFeedback = (
   }
   // No web fallback - haptic feedback is native-only feature
 };
+
+/**
+ * Requests the device camera with a native-first WebView strategy.
+ * In WebView, this asks the native host for camera permission before falling back to getUserMedia.
+ */
+export const requestCamera = async (facingMode: 'user' | 'environment' = 'environment'): Promise<MediaStream> => {
+  if (isInWebView()) {
+    await callNative('requestCameraPermission', { facingMode });
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error('Camera API unavailable');
+  }
+
+  return navigator.mediaDevices.getUserMedia({
+    video: { facingMode },
+    audio: false,
+  });
+};
+
+/**
+ * Opens the native camera in WebView when available and returns a captured JPEG File.
+ * Hosts may return either a `dataURL` field or a raw data URL string.
+ */
+export const takePhotoWithNativeCamera = async (filename = 'facture-photo.jpg'): Promise<File> => {
+  if (!isInWebView()) {
+    throw new Error('Native camera is only available in WebView');
+  }
+
+  const result = await callNative('takePhoto', { quality: 0.9, filename });
+  const dataURL = typeof result === 'string' ? result : result?.dataURL;
+  if (!dataURL || typeof dataURL !== 'string') {
+    throw new Error('Native camera did not return a photo data URL');
+  }
+
+  return dataURLToFile(dataURL, filename);
+};
+
+export const dataURLToFile = (dataURL: string, filename: string): File => {
+  const [header, base64] = dataURL.split(',');
+  const mimeMatch = header.match(/data:(.*?);base64/);
+  const mime = mimeMatch?.[1] || 'image/jpeg';
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return new File([bytes], filename, { type: mime });
+};
