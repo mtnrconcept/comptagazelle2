@@ -1,6 +1,53 @@
 import { create } from 'zustand';
 import { Transaction, Invoice, Supplier, AccountingCategory, MonthlyData, Alert } from '../types';
 
+const normalizeSupplierName = (name: string) => (name.trim() || 'Inconnu')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .replace(/\s+/g, ' ')
+  .toLocaleLowerCase('fr-CH');
+
+const createSupplierFromInvoice = (invoice: Invoice): Supplier => ({
+  id: `supplier-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+  name: invoice.supplier.trim() || 'Inconnu',
+  category: invoice.category || 'Non catégorisé',
+  invoiceCount: 1,
+  totalAmount: invoice.amountTTC,
+});
+
+const recalculateSuppliers = (invoices: Invoice[], existingSuppliers: Supplier[]): Supplier[] => {
+  const suppliersByName = new Map<string, Supplier>();
+
+  existingSuppliers.forEach((supplier) => {
+    suppliersByName.set(normalizeSupplierName(supplier.name), {
+      ...supplier,
+      invoiceCount: 0,
+      totalAmount: 0,
+    });
+  });
+
+  invoices.forEach((invoice) => {
+    const supplierName = invoice.supplier.trim() || 'Inconnu';
+    const normalizedName = normalizeSupplierName(supplierName);
+    const existingSupplier = suppliersByName.get(normalizedName);
+
+    if (existingSupplier) {
+      suppliersByName.set(normalizedName, {
+        ...existingSupplier,
+        name: existingSupplier.name || supplierName,
+        category: invoice.category || existingSupplier.category,
+        invoiceCount: existingSupplier.invoiceCount + 1,
+        totalAmount: existingSupplier.totalAmount + invoice.amountTTC,
+      });
+      return;
+    }
+
+    suppliersByName.set(normalizedName, createSupplierFromInvoice(invoice));
+  });
+
+  return Array.from(suppliersByName.values()).filter((supplier) => supplier.invoiceCount > 0);
+};
+
 const defaultCategories: AccountingCategory[] = [
   { id: '1', name: 'Chiffre d\'affaires', type: 'revenue', code: '3000' },
   { id: '2', name: 'Achats marchandises', type: 'expense', code: '4000' },
@@ -42,11 +89,48 @@ export const useStore = create<AppState>((set) => ({
   monthlyData: [],
   addTransaction: (t) => set((state) => ({ transactions: [...state.transactions, t] })),
   addTransactions: (ts) => set((state) => ({ transactions: [...state.transactions, ...ts] })),
-  addInvoice: (inv) => set((state) => ({ invoices: [...state.invoices, inv] })),
-  updateInvoice: (id, updates) => set((state) => ({
-    invoices: state.invoices.map((inv) => inv.id === id ? { ...inv, ...updates } : inv),
-  })),
-  deleteInvoice: (id) => set((state) => ({
-    invoices: state.invoices.filter((inv) => inv.id !== id),
-  })),
+  addInvoice: (inv) => set((state) => {
+    const invoices = [...state.invoices, inv];
+    const normalizedName = normalizeSupplierName(inv.supplier || 'Inconnu');
+    const existingSupplier = state.suppliers.find(
+      (supplier) => normalizeSupplierName(supplier.name) === normalizedName,
+    );
+
+    if (!existingSupplier) {
+      return {
+        invoices,
+        suppliers: [...state.suppliers, createSupplierFromInvoice(inv)],
+      };
+    }
+
+    return {
+      invoices,
+      suppliers: state.suppliers.map((supplier) => (
+        supplier.id === existingSupplier.id
+          ? {
+              ...supplier,
+              category: inv.category || supplier.category,
+              invoiceCount: supplier.invoiceCount + 1,
+              totalAmount: supplier.totalAmount + inv.amountTTC,
+            }
+          : supplier
+      )),
+    };
+  }),
+  updateInvoice: (id, updates) => set((state) => {
+    const invoices = state.invoices.map((inv) => inv.id === id ? { ...inv, ...updates } : inv);
+
+    return {
+      invoices,
+      suppliers: recalculateSuppliers(invoices, state.suppliers),
+    };
+  }),
+  deleteInvoice: (id) => set((state) => {
+    const invoices = state.invoices.filter((inv) => inv.id !== id);
+
+    return {
+      invoices,
+      suppliers: recalculateSuppliers(invoices, state.suppliers),
+    };
+  }),
 }));
