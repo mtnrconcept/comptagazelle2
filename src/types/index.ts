@@ -1,5 +1,10 @@
 // Types for Gazelle Comptabilité
 
+export interface Period {
+  start: string;
+  end: string;
+}
+
 export interface Transaction {
   id: string;
   date: string;
@@ -9,7 +14,6 @@ export interface Transaction {
   category: string;
   reference?: string;
   invoiceId?: string;
-  accountingEntryId?: string;
   reconciled: boolean;
 }
 
@@ -28,7 +32,6 @@ export interface Invoice {
   fileName?: string;
   fileUrl?: string;
   transactionId?: string;
-  accountingEntryId?: string;
   iban?: string;
   paymentTerms?: string;
 }
@@ -49,75 +52,26 @@ export interface AccountingCategory {
   parentId?: string;
 }
 
-export interface AccountingLine {
-  id: string;
-  accountCode: string;
-  accountName: string;
-  debit: number;
-  credit: number;
-  categoryId?: string;
-  categoryName?: string;
-  invoiceId?: string;
-  supplierId?: string;
-  transactionId?: string;
-  vatRate?: number;
-  kind: 'ht' | 'vat' | 'ttc' | 'bank' | 'other';
-
-export interface AccountingDocument {
-  id: string;
-  entityType: 'invoice' | 'transaction' | 'supplier' | 'accounting_entry';
-  entityId: string;
-  fileName: string;
-  mimeType?: string;
-  fileUrl?: string;
-  checksum?: string;
-  uploadedAt: string;
-}
-
-export interface AccountingEntryLine {
-  accountCode: string;
-  label: string;
-  debit: number;
-  credit: number;
+export interface MonthlyData {
+  month: string;
+  revenue: number;
+  expenses: number;
+  profit: number;
 }
 
 export interface AccountingEntry {
   id: string;
   date: string;
   description: string;
-  reference?: string;
-  invoiceId?: string;
-  supplierId?: string;
-  transactionId?: string;
-  categoryId?: string;
-  categoryName?: string;
-  status: 'to_validate' | 'validated' | 'exported';
-  source: 'invoice_scan' | 'bank_import' | 'manual';
-  lines: AccountingLine[];
-  createdAt: string;
-}
-
-  label: string;
-  sourceType: 'invoice' | 'transaction' | 'manual';
-  sourceId?: string;
-  lines: AccountingEntryLine[];
-  createdAt: string;
-}
-
-export interface PersistentStateSnapshot {
-  invoices: Invoice[];
-  transactions: Transaction[];
-  suppliers: Supplier[];
-  categories: AccountingCategory[];
-  documents: AccountingDocument[];
-  accountingEntries: AccountingEntry[];
-}
-
-export interface MonthlyData {
-  month: string;
-  revenue: number;
-  expenses: number;
-  profit: number;
+  accountCode: string;
+  accountName: string;
+  debit: number;
+  credit: number;
+  category: string;
+  sourceType: 'transaction' | 'invoice' | 'manual' | 'demo';
+  sourceId: string;
+  validated: boolean;
+  demo?: boolean;
 }
 
 export interface BalanceSheet {
@@ -127,6 +81,7 @@ export interface BalanceSheet {
     receivables: number;
     stock: number;
     fixedAssets: number;
+    vatRecoverable: number;
   };
   liabilities: {
     supplierDebts: number;
@@ -143,6 +98,23 @@ export interface VATReport {
   collected: number;
   deductible: number;
   netPayable: number;
+}
+
+export interface IncomeStatementReport {
+  revenue: number;
+  purchases: number;
+  grossMargin: number;
+  personnel: number;
+  fixedCharges: number;
+  variableCharges: number;
+  ebitda: number;
+  netResult: number;
+}
+
+export interface ReportDataQuality {
+  complete: boolean;
+  validated: boolean;
+  issues: string[];
 }
 
 export interface Alert {
