@@ -47,6 +47,44 @@ export interface AccountingCategory {
   parentId?: string;
 }
 
+
+export interface AccountingDocument {
+  id: string;
+  entityType: 'invoice' | 'transaction' | 'supplier' | 'accounting_entry';
+  entityId: string;
+  fileName: string;
+  mimeType?: string;
+  fileUrl?: string;
+  checksum?: string;
+  uploadedAt: string;
+}
+
+export interface AccountingEntryLine {
+  accountCode: string;
+  label: string;
+  debit: number;
+  credit: number;
+}
+
+export interface AccountingEntry {
+  id: string;
+  date: string;
+  label: string;
+  sourceType: 'invoice' | 'transaction' | 'manual';
+  sourceId?: string;
+  lines: AccountingEntryLine[];
+  createdAt: string;
+}
+
+export interface PersistentStateSnapshot {
+  invoices: Invoice[];
+  transactions: Transaction[];
+  suppliers: Supplier[];
+  categories: AccountingCategory[];
+  documents: AccountingDocument[];
+  accountingEntries: AccountingEntry[];
+}
+
 export interface MonthlyData {
   month: string;
   revenue: number;
