@@ -1,52 +1,64 @@
+import { useState } from 'react';
 import { Download, FileSpreadsheet, FileText, FolderArchive } from 'lucide-react';
 import { useStore } from '../store';
+import PeriodSelector from '../components/reporting/PeriodSelector';
+import DataQualityWarning from '../components/reporting/DataQualityWarning';
+import { assessDataQuality, buildIncomeStatement, filterEntriesByPeriod, formatCHF, formatPeriod, getCurrentMonthPeriod, periodToMonthValue } from '../utils/accounting';
 
 export default function Exports() {
-  const { transactions, invoices } = useStore();
+  const { transactions, invoices, accountingEntries, demoMode } = useStore();
+  const [period, setPeriod] = useState(getCurrentMonthPeriod);
+  const periodEntries = filterEntriesByPeriod(accountingEntries, period, demoMode);
+  const statement = buildIncomeStatement(periodEntries);
+  const quality = assessDataQuality(accountingEntries, periodEntries);
 
   const handleExportCSV = () => {
-    const headers = 'Date;Description;Montant;Type;Catégorie;Référence;Rapproché\n';
-    const rows = transactions.map(t => 
-      `${t.date};${t.description};${t.type === 'debit' ? '-' : ''}${t.amount};${t.type};${t.category};${t.reference || ''};${t.reconciled ? 'Oui' : 'Non'}`
+    const headers = 'Date;Description;Compte;Libellé compte;Débit;Crédit;Catégorie;Source;Validée\n';
+    const rows = periodEntries.map((entry) =>
+      `${entry.date};${entry.description};${entry.accountCode};${entry.accountName};${entry.debit};${entry.credit};${entry.category};${entry.sourceType};${entry.validated ? 'Oui' : 'Non'}`
     ).join('\n');
-    const csv = headers + rows;
-    downloadFile(csv, 'transactions_gazelle.csv', 'text/csv');
+    downloadFile(headers + rows, `ecritures_${periodToMonthValue(period)}.csv`, 'text/csv');
+  };
+
+  const handleExportTransactionsCSV = () => {
+    const headers = 'Date;Description;Montant;Type;Catégorie;Référence;Rapproché\n';
+    const rows = transactions
+      .filter((transaction) => transaction.date >= period.start && transaction.date <= period.end)
+      .map((transaction) =>
+        `${transaction.date};${transaction.description};${transaction.type === 'debit' ? '-' : ''}${transaction.amount};${transaction.type};${transaction.category};${transaction.reference || ''};${transaction.reconciled ? 'Oui' : 'Non'}`
+      ).join('\n');
+    downloadFile(headers + rows, `transactions_${periodToMonthValue(period)}.csv`, 'text/csv');
   };
 
   const handleExportInvoicesCSV = () => {
     const headers = 'Fournisseur;N° Facture;Date;Échéance;HT;TVA;TTC;Catégorie;Statut\n';
-    const rows = invoices.map(i =>
-      `${i.supplier};${i.invoiceNumber};${i.date};${i.dueDate};${i.amountHT};${i.tva};${i.amountTTC};${i.category};${i.status}`
-    ).join('\n');
-    const csv = headers + rows;
-    downloadFile(csv, 'factures_gazelle.csv', 'text/csv');
+    const rows = invoices
+      .filter((invoice) => invoice.date >= period.start && invoice.date <= period.end)
+      .map((invoice) =>
+        `${invoice.supplier};${invoice.invoiceNumber};${invoice.date};${invoice.dueDate};${invoice.amountHT};${invoice.tva};${invoice.amountTTC};${invoice.category};${invoice.status}`
+      ).join('\n');
+    downloadFile(headers + rows, `factures_${periodToMonthValue(period)}.csv`, 'text/csv');
   };
 
   const handleExportIncomeStatement = () => {
-    const revenue = transactions.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-    const purchases = transactions.filter(t => t.type === 'debit' && t.category === 'Achats marchandises').reduce((s, t) => s + t.amount, 0);
-    const personnel = transactions.filter(t => t.type === 'debit' && t.category === 'Charges personnel').reduce((s, t) => s + t.amount, 0);
-    const rent = transactions.filter(t => t.type === 'debit' && t.category === 'Loyer').reduce((s, t) => s + t.amount, 0);
-    const exploitation = transactions.filter(t => t.type === 'debit' && t.category === 'Charges exploitation').reduce((s, t) => s + t.amount, 0);
-    const insurance = transactions.filter(t => t.type === 'debit' && t.category === 'Assurances').reduce((s, t) => s + t.amount, 0);
-    
     const content = `COMPTE DE RÉSULTAT - La Gazelle d'Or
-Période: Mai 2026
+Période: ${formatPeriod(period)}
 
-Chiffre d'affaires: CHF ${revenue.toFixed(2)}
-Coût des marchandises: CHF -${purchases.toFixed(2)}
-Marge brute: CHF ${(revenue - purchases).toFixed(2)}
-Charges de personnel: CHF -${personnel.toFixed(2)}
-Loyer: CHF -${rent.toFixed(2)}
-Charges d'exploitation: CHF -${exploitation.toFixed(2)}
-Assurances: CHF -${insurance.toFixed(2)}
-RÉSULTAT NET: CHF ${(revenue - purchases - personnel - rent - exploitation - insurance).toFixed(2)}
+Chiffre d'affaires: ${formatCHF(statement.revenue)}
+Coût des marchandises: ${formatCHF(-statement.purchases)}
+Marge brute: ${formatCHF(statement.grossMargin)}
+Charges de personnel: ${formatCHF(-statement.personnel)}
+Charges fixes: ${formatCHF(-statement.fixedCharges)}
+Charges variables: ${formatCHF(-statement.variableCharges)}
+RÉSULTAT NET: ${formatCHF(statement.netResult)}
+
+Qualité des données: ${quality.complete ? 'complètes et validées' : quality.issues.join(' | ')}
 
 ---
-Document généré automatiquement par Gazelle Comptabilité.
+Document généré automatiquement par Gazelle Comptabilité à partir des écritures comptables de la période.
 Les données doivent être vérifiées par une personne compétente avant déclaration officielle.`;
-    
-    downloadFile(content, 'compte_resultat_mai2026.txt', 'text/plain');
+
+    downloadFile(content, `compte_resultat_${periodToMonthValue(period)}.txt`, 'text/plain');
   };
 
   const downloadFile = (content: string, filename: string, type: string) => {
@@ -59,42 +71,54 @@ Les données doivent être vérifiées par une personne compétente avant décla
   };
 
   const exports = [
-    { 
-      label: 'Transactions (CSV)', 
-      desc: 'Export de toutes les transactions bancaires au format CSV',
+    {
+      label: 'Écritures comptables (CSV)',
+      desc: 'Export de la source comptable unique filtrée par période',
       icon: FileSpreadsheet,
       action: handleExportCSV,
       color: 'bg-emerald-50 text-emerald-600'
     },
-    { 
-      label: 'Factures (CSV)', 
-      desc: 'Export de toutes les factures avec détails fournisseurs',
+    {
+      label: 'Transactions (CSV)',
+      desc: 'Export des transactions bancaires de la période',
       icon: FileSpreadsheet,
-      action: handleExportInvoicesCSV,
+      action: handleExportTransactionsCSV,
       color: 'bg-blue-50 text-blue-600'
     },
-    { 
-      label: 'Compte de résultat', 
-      desc: 'Export du compte de résultat estimé au format texte',
+    {
+      label: 'Factures (CSV)',
+      desc: 'Export des factures de la période avec détails fournisseurs',
+      icon: FileSpreadsheet,
+      action: handleExportInvoicesCSV,
+      color: 'bg-purple-50 text-purple-600'
+    },
+    {
+      label: 'Compte de résultat',
+      desc: 'Export du compte de résultat calculé au format texte',
       icon: FileText,
       action: handleExportIncomeStatement,
       color: 'bg-gold-50 text-gold-600'
     },
-    { 
-      label: 'Export fiduciaire', 
-      desc: 'Package complet pour transmission à votre fiduciaire',
+    {
+      label: 'Export fiduciaire',
+      desc: 'Package comptable basé sur les écritures validées de la période',
       icon: FolderArchive,
       action: handleExportCSV,
-      color: 'bg-purple-50 text-purple-600'
+      color: 'bg-dark-50 text-dark-700'
     },
   ];
 
   return (
     <div className="space-y-7">
-      <div>
-        <h1 className="text-3xl font-bold text-dark-900 tracking-tight">Exports</h1>
-        <p className="text-dark-400 text-sm mt-1.5 font-medium">Exportez vos données comptables dans différents formats</p>
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold text-dark-900 tracking-tight">Exports</h1>
+          <p className="text-dark-400 text-sm mt-1.5 font-medium">Exportez vos écritures et rapports pour {formatPeriod(period)}</p>
+        </div>
+        <PeriodSelector period={period} onChange={setPeriod} />
       </div>
+
+      <DataQualityWarning quality={quality} />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {exports.map((exp) => (
@@ -106,7 +130,7 @@ Les données doivent être vérifiées par une personne compétente avant décla
               <div className="flex-1">
                 <h3 className="font-semibold text-dark-900">{exp.label}</h3>
                 <p className="text-sm text-dark-500 mt-1">{exp.desc}</p>
-                <button 
+                <button
                   onClick={exp.action}
                   className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-dark-900 text-white rounded-xl text-sm font-medium hover:bg-dark-800 transition-all btn-premium"
                 >

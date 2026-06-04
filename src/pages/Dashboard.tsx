@@ -1,11 +1,15 @@
+import { useState } from 'react';
 import { useStore } from '../store';
 import { 
   TrendingUp, TrendingDown, DollarSign, Receipt, 
-  CreditCard, AlertTriangle, Info, ArrowUpRight, ArrowDownRight
+  CreditCard, AlertTriangle, Info
 } from 'lucide-react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar } from 'recharts';
 import { motion } from 'framer-motion';
 import clsx from 'clsx';
+import PeriodSelector from '../components/reporting/PeriodSelector';
+import DataQualityWarning from '../components/reporting/DataQualityWarning';
+import { assessDataQuality, buildIncomeStatement, buildMonthlyData, buildVATReport, filterEntriesByPeriod, formatCHF, formatPeriod, getCurrentMonthPeriod } from '../utils/accounting';
 
 const containerVariants = {
   hidden: { opacity: 0 },
@@ -21,31 +25,28 @@ const itemVariants = {
 };
 
 export default function Dashboard() {
-  const { transactions, invoices, alerts, monthlyData } = useStore();
-
-  const revenue = transactions
-    .filter(t => t.type === 'credit')
-    .reduce((sum, t) => sum + t.amount, 0);
-  
-  const expenses = transactions
-    .filter(t => t.type === 'debit')
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const netResult = revenue - expenses;
-  const tvaEstimated = revenue * 0.081;
-  const bankBalance = 45230.50;
-  const unpaidInvoices = invoices.filter(i => i.status !== 'paid');
+  const { invoices, alerts, accountingEntries, demoMode } = useStore();
+  const [period, setPeriod] = useState(getCurrentMonthPeriod);
+  const periodEntries = filterEntriesByPeriod(accountingEntries, period, demoMode);
+  const statement = buildIncomeStatement(periodEntries);
+  const vatReport = buildVATReport(periodEntries, period);
+  const quality = assessDataQuality(accountingEntries, periodEntries);
+  const year = new Date(`${period.start}T00:00:00`).getFullYear();
+  const monthlyData = buildMonthlyData(demoMode ? accountingEntries : accountingEntries.filter((entry) => !entry.demo), year);
+  const bankBalance = accountingEntries
+    .filter((entry) => entry.accountCode === '1020' && entry.date <= period.end && (demoMode || !entry.demo))
+    .reduce((sum, entry) => sum + entry.debit - entry.credit, 0);
+  const expenses = statement.purchases + statement.personnel + statement.fixedCharges + statement.variableCharges;
+  const unpaidInvoices = invoices.filter((invoice) => invoice.status !== 'paid' && invoice.date <= period.end);
 
   const stats = [
-    { label: 'Chiffre d\'affaires', value: revenue, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50', borderColor: 'border-emerald-100', trend: '+12%', trendUp: true },
-    { label: 'Dépenses', value: expenses, icon: TrendingDown, color: 'text-rose-500', bg: 'bg-rose-50', borderColor: 'border-rose-100', trend: '+3%', trendUp: false },
-    { label: 'Résultat net', value: netResult, icon: DollarSign, color: 'text-gold-600', bg: 'bg-gold-50', borderColor: 'border-gold-100', trend: '+8%', trendUp: true },
-    { label: 'TVA estimée', value: tvaEstimated, icon: Receipt, color: 'text-sky-600', bg: 'bg-sky-50', borderColor: 'border-sky-100' },
+    { label: "Chiffre d'affaires", value: statement.revenue, icon: TrendingUp, color: 'text-emerald-600', bg: 'bg-emerald-50', borderColor: 'border-emerald-100' },
+    { label: 'Dépenses', value: expenses, icon: TrendingDown, color: 'text-rose-500', bg: 'bg-rose-50', borderColor: 'border-rose-100' },
+    { label: 'Résultat net', value: statement.netResult, icon: DollarSign, color: 'text-gold-600', bg: 'bg-gold-50', borderColor: 'border-gold-100' },
+    { label: 'TVA nette', value: vatReport.netPayable, icon: Receipt, color: 'text-sky-600', bg: 'bg-sky-50', borderColor: 'border-sky-100' },
     { label: 'Solde bancaire', value: bankBalance, icon: CreditCard, color: 'text-dark-700', bg: 'bg-dark-50', borderColor: 'border-dark-100' },
     { label: 'Factures à payer', value: unpaidInvoices.length, icon: AlertTriangle, color: 'text-amber-600', bg: 'bg-amber-50', borderColor: 'border-amber-100', isCount: true },
   ];
-
-  const formatCHF = (v: number) => new Intl.NumberFormat('fr-CH', { style: 'currency', currency: 'CHF' }).format(v);
 
   return (
     <motion.div 
@@ -58,12 +59,9 @@ export default function Dashboard() {
       <motion.div variants={itemVariants} className="flex items-end justify-between">
         <div>
           <h1 className="text-3xl font-bold text-dark-900 tracking-tight">Tableau de bord</h1>
-          <p className="text-dark-400 text-sm mt-1.5 font-medium">Vue d'ensemble financière — Mai 2026</p>
+          <p className="text-dark-400 text-sm mt-1.5 font-medium">Vue d'ensemble financière — {formatPeriod(period)}</p>
         </div>
-        <div className="hidden sm:flex items-center gap-2 text-xs text-dark-400 bg-white rounded-full px-4 py-2 shadow-soft border border-dark-100/50">
-          <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
-          Données en temps réel
-        </div>
+        <PeriodSelector period={period} onChange={setPeriod} />
       </motion.div>
 
       {/* Stats Grid */}
@@ -84,15 +82,7 @@ export default function Dashboard() {
                 <p className={clsx('text-[26px] font-bold mt-1.5 tracking-tight', stat.color)}>
                   {stat.isCount ? stat.value : formatCHF(stat.value as number)}
                 </p>
-                {stat.trend && (
-                  <div className={clsx(
-                    'inline-flex items-center gap-0.5 mt-2 text-[11px] font-semibold px-2 py-0.5 rounded-full',
-                    stat.trendUp ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-500'
-                  )}>
-                    {stat.trendUp ? <ArrowUpRight size={11} /> : <ArrowDownRight size={11} />}
-                    {stat.trend} ce mois
-                  </div>
-                )}
+
               </div>
               <div className={clsx('p-2.5 rounded-xl', stat.bg)}>
                 <stat.icon size={20} className={stat.color} />
@@ -102,13 +92,15 @@ export default function Dashboard() {
         ))}
       </motion.div>
 
+      <DataQualityWarning quality={quality} />
+
       {/* Charts */}
       <motion.div variants={itemVariants} className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* Revenue Chart */}
         <div className="bg-white rounded-2xl p-6 border border-dark-100/50 shadow-soft">
           <div className="flex items-center justify-between mb-5">
             <h3 className="font-semibold text-dark-900 text-[15px]">Évolution mensuelle</h3>
-            <span className="text-[11px] text-dark-400 bg-dark-50 px-2.5 py-1 rounded-full font-medium">2026</span>
+            <span className="text-[11px] text-dark-400 bg-dark-50 px-2.5 py-1 rounded-full font-medium">{year}</span>
           </div>
           <ResponsiveContainer width="100%" height={220}>
             <AreaChart data={monthlyData}>
