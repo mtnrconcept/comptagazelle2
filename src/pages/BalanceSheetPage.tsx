@@ -2,13 +2,19 @@ import { useStore } from '../store';
 import { Download } from 'lucide-react';
 
 export default function BalanceSheetPage() {
-  const { transactions, invoices } = useStore();
+  const { accountingEntries } = useStore();
 
-  const revenue = transactions.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-  const expenses = transactions.filter(t => t.type === 'debit').reduce((s, t) => s + t.amount, 0);
+  const accountBalance = (prefixes: string[]) => accountingEntries.reduce((entrySum, entry) => (
+    entrySum + entry.lines
+      .filter((line) => prefixes.some((prefix) => line.accountCode.startsWith(prefix)))
+      .reduce((lineSum, line) => lineSum + line.debit - line.credit, 0)
+  ), 0);
+  const revenue = -accountBalance(['3']);
+  const expenses = accountBalance(['4', '5', '6', '7']);
   const netResult = revenue - expenses;
-  const unpaidInvoices = invoices.filter(i => i.status !== 'paid');
-  const supplierDebts = unpaidInvoices.reduce((s, i) => s + i.amountTTC, 0);
+  const supplierDebts = Math.abs(accountBalance(['2000']));
+  const vatBalance = accountBalance(['1170', '2200']);
+  const pendingEntries = accountingEntries.filter((entry) => entry.status === 'to_validate').length;
 
   const formatCHF = (v: number) => new Intl.NumberFormat('fr-CH', { style: 'currency', currency: 'CHF' }).format(v);
 
@@ -23,7 +29,7 @@ export default function BalanceSheetPage() {
   const liabilities = {
     supplierDebts,
     taxDebts: 4200.00,
-    vatPayable: revenue * 0.081,
+    vatPayable: Math.max(0, -vatBalance),
     loans: 80000.00,
     equity: 50000.00,
     netResult,
@@ -37,7 +43,7 @@ export default function BalanceSheetPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-dark-900 tracking-tight">Bilan</h1>
-          <p className="text-dark-400 text-sm mt-1.5 font-medium">Au 28 mai 2026 (estimé)</p>
+          <p className="text-dark-400 text-sm mt-1.5 font-medium">Au 28 mai 2026 · basé sur les écritures</p>
         </div>
         <button className="inline-flex items-center gap-2 px-5 py-2.5 bg-dark-900 text-white rounded-xl text-sm font-medium hover:bg-dark-800 transition-all shadow-soft hover:shadow-card">
           <Download size={16} />
@@ -90,7 +96,7 @@ export default function BalanceSheetPage() {
 
       <div className="bg-gold-50/80 border border-gold-200 rounded-xl p-4 text-sm text-gold-800">
         <p className="font-medium">⚠️ Bilan simplifié</p>
-        <p className="mt-1">Ce bilan est une estimation basée sur les données disponibles. Les données comptables doivent être vérifiées par une personne compétente avant déclaration officielle.</p>
+        <p className="mt-1">Ce bilan est une estimation basée sur les écritures comptables, dont {pendingEntries} à valider. Les données comptables doivent être vérifiées par une personne compétente avant déclaration officielle.</p>
       </div>
     </div>
   );

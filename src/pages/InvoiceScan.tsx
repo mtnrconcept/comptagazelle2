@@ -8,7 +8,7 @@ import { runAIVisionOCR, AIVisionOCRResult, VISION_MODELS, VisionModelId } from 
 type OCRMethod = 'ai-vision' | 'tesseract';
 
 export default function InvoiceScan() {
-  const { addInvoice, categories } = useStore();
+  const { saveInvoiceAccountingFlow, categories } = useStore();
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
@@ -156,9 +156,10 @@ export default function InvoiceScan() {
       iban: scannedData.iban,
       paymentTerms: scannedData.paymentTerms,
     };
-    addInvoice(invoice);
+    saveInvoiceAccountingFlow({ invoice, categoryName: invoice.category });
+    setScannedData((prev) => prev ? { ...prev, category: invoice.category } : prev);
     setSaved(true);
-  }, [scannedData, file, addInvoice]);
+  }, [scannedData, file, saveInvoiceAccountingFlow]);
 
   const updateField = (field: keyof Invoice, value: string | number) => {
     setScannedData(prev => prev ? { ...prev, [field]: value } : null);
@@ -580,7 +581,7 @@ export default function InvoiceScan() {
               {saved ? '✓ Facture enregistrée' : 'Enregistrer la facture'}
             </button>
             {saved && (
-              <p className="text-sm text-emerald-600 font-medium">Facture classée automatiquement dans "{scannedData.category}"</p>
+              <p className="text-sm text-emerald-600 font-medium">Facture, fournisseur, dette et écriture comptable créés en statut “à valider” pour "{scannedData.category}"</p>
             )}
           </div>
         </div>
