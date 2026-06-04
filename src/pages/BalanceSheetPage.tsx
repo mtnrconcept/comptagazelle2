@@ -1,40 +1,17 @@
+import { useState } from 'react';
 import { useStore } from '../store';
 import { Download } from 'lucide-react';
+import PeriodSelector from '../components/reporting/PeriodSelector';
+import DataQualityWarning from '../components/reporting/DataQualityWarning';
+import { assessDataQuality, buildBalanceSheet, filterEntriesByPeriod, formatCHF, formatDate, getCurrentMonthPeriod } from '../utils/accounting';
 
 export default function BalanceSheetPage() {
-  const { accountingEntries } = useStore();
-
-  const accountBalance = (prefixes: string[]) => accountingEntries.reduce((entrySum, entry) => (
-    entrySum + entry.lines
-      .filter((line) => prefixes.some((prefix) => line.accountCode.startsWith(prefix)))
-      .reduce((lineSum, line) => lineSum + line.debit - line.credit, 0)
-  ), 0);
-  const revenue = -accountBalance(['3']);
-  const expenses = accountBalance(['4', '5', '6', '7']);
-  const netResult = revenue - expenses;
-  const supplierDebts = Math.abs(accountBalance(['2000']));
-  const vatBalance = accountBalance(['1170', '2200']);
-  const pendingEntries = accountingEntries.filter((entry) => entry.status === 'to_validate').length;
-
-  const formatCHF = (v: number) => new Intl.NumberFormat('fr-CH', { style: 'currency', currency: 'CHF' }).format(v);
-
-  const assets = {
-    bank: 45230.50,
-    cash: 2800.00,
-    receivables: 3200.00,
-    stock: 8500.00,
-    fixedAssets: 125000.00,
-  };
-
-  const liabilities = {
-    supplierDebts,
-    taxDebts: 4200.00,
-    vatPayable: Math.max(0, -vatBalance),
-    loans: 80000.00,
-    equity: 50000.00,
-    netResult,
-  };
-
+  const { accountingEntries, demoMode } = useStore();
+  const [period, setPeriod] = useState(getCurrentMonthPeriod);
+  const periodEntries = filterEntriesByPeriod(accountingEntries, period, demoMode);
+  const entriesUntilDate = accountingEntries.filter((entry) => entry.date <= period.end && (demoMode || !entry.demo));
+  const quality = assessDataQuality(accountingEntries, periodEntries);
+  const { assets, liabilities } = buildBalanceSheet(entriesUntilDate);
   const totalAssets = Object.values(assets).reduce((s, v) => s + v, 0);
   const totalLiabilities = Object.values(liabilities).reduce((s, v) => s + v, 0);
 
@@ -43,16 +20,20 @@ export default function BalanceSheetPage() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-dark-900 tracking-tight">Bilan</h1>
-          <p className="text-dark-400 text-sm mt-1.5 font-medium">Au 28 mai 2026 · basé sur les écritures</p>
+          <p className="text-dark-400 text-sm mt-1.5 font-medium">Au {formatDate(period.end)}</p>
         </div>
-        <button className="inline-flex items-center gap-2 px-5 py-2.5 bg-dark-900 text-white rounded-xl text-sm font-medium hover:bg-dark-800 transition-all shadow-soft hover:shadow-card">
-          <Download size={16} />
-          Exporter PDF
-        </button>
+        <div className="flex flex-col sm:flex-row gap-3 sm:items-center">
+          <PeriodSelector period={period} onChange={setPeriod} label="Mois de clôture" />
+          <button className="inline-flex items-center gap-2 px-5 py-2.5 bg-dark-900 text-white rounded-xl text-sm font-medium hover:bg-dark-800 transition-all shadow-soft hover:shadow-card">
+            <Download size={16} />
+            Exporter PDF
+          </button>
+        </div>
       </div>
 
+      <DataQualityWarning quality={quality} />
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Actifs */}
         <div className="bg-white rounded-2xl border border-dark-100/50 overflow-hidden shadow-soft">
           <div className="px-6 py-4 bg-emerald-50/80 border-b border-emerald-200">
             <h3 className="font-bold text-emerald-800 text-lg">ACTIFS</h3>
@@ -62,7 +43,8 @@ export default function BalanceSheetPage() {
               <tr><td className="px-6 py-3 text-dark-700">Banque</td><td className="px-6 py-3 text-right font-mono font-medium">{formatCHF(assets.bank)}</td></tr>
               <tr><td className="px-6 py-3 text-dark-700">Caisse</td><td className="px-6 py-3 text-right font-mono font-medium">{formatCHF(assets.cash)}</td></tr>
               <tr><td className="px-6 py-3 text-dark-700">Créances clients</td><td className="px-6 py-3 text-right font-mono font-medium">{formatCHF(assets.receivables)}</td></tr>
-              <tr><td className="px-6 py-3 text-dark-700">Stock estimé</td><td className="px-6 py-3 text-right font-mono font-medium">{formatCHF(assets.stock)}</td></tr>
+              <tr><td className="px-6 py-3 text-dark-700">TVA récupérable</td><td className="px-6 py-3 text-right font-mono font-medium">{formatCHF(assets.vatRecoverable)}</td></tr>
+              <tr><td className="px-6 py-3 text-dark-700">Stock</td><td className="px-6 py-3 text-right font-mono font-medium">{formatCHF(assets.stock)}</td></tr>
               <tr><td className="px-6 py-3 text-dark-700">Immobilisations</td><td className="px-6 py-3 text-right font-mono font-medium">{formatCHF(assets.fixedAssets)}</td></tr>
               <tr className="bg-emerald-50">
                 <td className="px-6 py-4 font-bold text-emerald-800">TOTAL ACTIFS</td>
@@ -72,7 +54,6 @@ export default function BalanceSheetPage() {
           </table>
         </div>
 
-        {/* Passifs */}
         <div className="bg-white rounded-2xl border border-dark-100/50 overflow-hidden shadow-soft">
           <div className="px-6 py-4 bg-sky-50/80 border-b border-sky-200">
             <h3 className="font-bold text-sky-800 text-lg">PASSIFS</h3>
@@ -95,8 +76,8 @@ export default function BalanceSheetPage() {
       </div>
 
       <div className="bg-gold-50/80 border border-gold-200 rounded-xl p-4 text-sm text-gold-800">
-        <p className="font-medium">⚠️ Bilan simplifié</p>
-        <p className="mt-1">Ce bilan est une estimation basée sur les écritures comptables, dont {pendingEntries} à valider. Les données comptables doivent être vérifiées par une personne compétente avant déclaration officielle.</p>
+        <p className="font-medium">⚠️ Bilan calculé</p>
+        <p className="mt-1">Ce bilan est calculé à partir des soldes d’écritures disponibles jusqu’à la date de clôture. Les postes sans écriture restent à zéro au lieu d’être simulés.</p>
       </div>
     </div>
   );
