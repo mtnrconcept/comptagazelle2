@@ -1,16 +1,39 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { useStore } from '../store';
-import { Upload, FileText, CheckCircle, AlertCircle, Eye, Zap, Settings2, Image as ImageIcon, Brain } from 'lucide-react';
+import { Upload, FileText, CheckCircle, AlertCircle, Eye, Zap, Settings2, Image as ImageIcon, Brain, Camera, X } from 'lucide-react';
 import { Invoice } from '../types';
-import { runOCR, OCRResult, defaultPreprocessingOptions, PreprocessingOptions } from '../utils/ocrEngine';
-import { runAIVisionOCR, AIVisionOCRResult, VISION_MODELS, VisionModelId } from '../utils/aiVisionOCR';
+import { OCRResult, defaultPreprocessingOptions, PreprocessingOptions } from '../utils/ocrEngine';
+import { AIVisionOCRResult, VISION_MODELS, VisionModelId } from '../utils/aiVisionOCR';
+import { capturePhoto, dataURLToFile, isInWebView, requestCamera, takePhotoWithNativeCamera } from '../utils/mobileFeatures';
+import {
+  AIVisionDocumentOCRResult,
+  detectDocumentMimeType,
+  DocumentPageImage,
+  prepareDocumentPages,
+  runDocumentAIVisionOCR,
+  runDocumentOCR,
+  TesseractDocumentOCRResult,
+  unsupportedDocumentMessage,
+} from '../utils/documentOCR';
 
 type OCRMethod = 'ai-vision' | 'tesseract';
+type DocumentKind = 'image' | 'pdf';
+
+const ACCEPTED_DOCUMENT_TYPES = '.jpg,.jpeg,.png,.webp,.bmp,.tif,.tiff,.pdf,image/*,application/pdf';
 
 export default function InvoiceScan() {
   const { addInvoice, categories } = useStore();
   const [file, setFile] = useState<File | null>(null);
+  const [documentKind, setDocumentKind] = useState<DocumentKind | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [documentPages, setDocumentPages] = useState<DocumentPageImage[]>([]);
+  const [bestPageNumber, setBestPageNumber] = useState<number | null>(null);
+  const [tesseractDocumentResult, setTesseractDocumentResult] = useState<TesseractDocumentOCRResult | null>(null);
+  const [aiDocumentResult, setAiDocumentResult] = useState<AIVisionDocumentOCRResult | null>(null);
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState(0);
   const [progressStatus, setProgressStatus] = useState('');
@@ -26,99 +49,176 @@ export default function InvoiceScan() {
   const [selectedModel, setSelectedModel] = useState<VisionModelId>('gemini-2.5-flash');
   const [scanError, setScanError] = useState<string | null>(null);
 
+  const cleanupDocumentPages = useCallback(() => {
+    setDocumentPages((pages) => {
+      pages.forEach((page) => URL.revokeObjectURL(page.previewUrl));
+      return [];
+    });
+  }, []);
+
+  const resetScanState = useCallback(() => {
+    setSaved(false);
+    setScannedData(null);
+    setOcrResult(null);
+    setAiResult(null);
+    setTesseractDocumentResult(null);
+    setAiDocumentResult(null);
+    setBestPageNumber(null);
+    setProgress(0);
+    setProgressStatus('');
+    setScanError(null);
+  }, []);
+
+  const selectFile = useCallback((f: File) => {
+    const detectedType = detectDocumentMimeType(f);
+    cleanupDocumentPages();
+    resetScanState();
+
+    if (detectedType === 'unsupported') {
+      setFile(null);
+      setDocumentKind(null);
+      setPreview(null);
+      setScanError(unsupportedDocumentMessage(f));
+      return;
+    }
+
+    setFile(f);
+    setDocumentKind(detectedType);
+    setPreview(URL.createObjectURL(f));
+  }, [cleanupDocumentPages, resetScanState]);
+
+  const stopCamera = useCallback(() => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    setCameraActive(false);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      cleanupDocumentPages();
+      if (preview) URL.revokeObjectURL(preview);
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, [cleanupDocumentPages, preview]);
+
   const handleFileDrop = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
-    if (f) {
-      setFile(f);
-      setSaved(false);
-      setScannedData(null);
-      setOcrResult(null);
-      setAiResult(null);
-      setProgress(0);
-      setProgressStatus('');
-      setScanError(null);
-      if (f.type.startsWith('image/')) {
-        const url = URL.createObjectURL(f);
-        setPreview(url);
-      } else {
-        setPreview(null);
+    if (f) selectFile(f);
+    e.target.value = '';
+  }, [selectFile]);
+
+  const handleTakePhoto = useCallback(async () => {
+    setCameraError(null);
+    setScanError(null);
+
+    try {
+      if (isInWebView()) {
+        const photo = await takePhotoWithNativeCamera(`facture-${Date.now()}.jpg`);
+        selectFile(photo);
+        return;
       }
+
+      const stream = await requestCamera('environment');
+      cameraStreamRef.current = stream;
+      setCameraActive(true);
+      window.setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(() => undefined);
+        }
+      }, 0);
+    } catch (error) {
+      console.error('Camera error:', error);
+      setCameraError('Impossible d’ouvrir la caméra. Vérifiez les permissions ou importez un fichier.');
     }
+  }, [selectFile]);
+
+  const handleCapturePhoto = useCallback(() => {
+    if (!videoRef.current) return;
+    const dataURL = capturePhoto(videoRef.current);
+    const photo = dataURLToFile(dataURL, `facture-${Date.now()}.jpg`);
+    stopCamera();
+    selectFile(photo);
+  }, [selectFile, stopCamera]);
+
+  const mapParsedInvoiceToScannedData = useCallback((parsed: any): Partial<Invoice> => {
+    let amountTTC = Number(parsed.amountTTC || 0);
+    let amountHT = Number(parsed.amountHT || 0);
+    let tva = Number(parsed.tva || 0);
+
+    if (!amountTTC && amountHT) amountTTC = amountHT + tva;
+    if (!tva && amountTTC && amountHT) tva = amountTTC - amountHT;
+
+    return {
+      supplier: parsed.supplier || '',
+      invoiceNumber: parsed.invoiceNumber || '',
+      date: parsed.date || new Date().toISOString().split('T')[0],
+      dueDate: parsed.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      amountHT,
+      tva,
+      amountTTC,
+      currency: parsed.currency || 'CHF',
+      category: parsed.category || 'Autres charges',
+      status: 'pending',
+      iban: parsed.iban || '',
+      paymentTerms: parsed.paymentTerms || '30 jours net',
+    };
   }, []);
 
   const handleScan = useCallback(async () => {
     if (!file) return;
+
+    const detectedType = detectDocumentMimeType(file);
+    if (detectedType === 'unsupported') {
+      setScanError(unsupportedDocumentMessage(file));
+      return;
+    }
+
     setScanning(true);
     setSaved(false);
     setProgress(0);
     setScanError(null);
+    setProgressStatus(detectedType === 'pdf' ? 'Préparation du PDF...' : 'Préparation de l’image...');
 
     try {
+      cleanupDocumentPages();
+      const pages = await prepareDocumentPages(file, (p, status) => {
+        setProgress(p);
+        setProgressStatus(status);
+      });
+      setDocumentPages(pages);
+
       if (ocrMethod === 'ai-vision') {
-        // AI Vision path
-        const result = await runAIVisionOCR(file, (p, status) => {
+        const documentResult = await runDocumentAIVisionOCR(pages, (p, status) => {
           setProgress(p);
           setProgressStatus(status);
         }, selectedModel);
 
-        setAiResult(result);
+        setAiDocumentResult(documentResult);
+        setTesseractDocumentResult(null);
+        setAiResult(documentResult.aggregated);
         setOcrResult(null);
-
-        const parsed = result.parsedInvoice;
-        setScannedData({
-          supplier: parsed.supplier || '',
-          invoiceNumber: parsed.invoiceNumber || '',
-          date: parsed.date || new Date().toISOString().split('T')[0],
-          dueDate: parsed.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          amountHT: parsed.amountHT || 0,
-          tva: parsed.tva || 0,
-          amountTTC: parsed.amountTTC || 0,
-          currency: parsed.currency || 'CHF',
-          category: parsed.category || 'Autres charges',
-          status: 'pending',
-          iban: parsed.iban || '',
-          paymentTerms: parsed.paymentTerms || '30 jours net',
-        });
+        setBestPageNumber(documentResult.bestPageNumber);
+        setScannedData(mapParsedInvoiceToScannedData(documentResult.aggregated.parsedInvoice));
       } else {
-        // Tesseract path
-        const result = await runOCR(file, (p, status) => {
+        const documentResult = await runDocumentOCR(pages, (p, status) => {
           setProgress(p);
           setProgressStatus(status);
         }, preprocessOptions);
-        
-        setOcrResult(result);
+
+        setTesseractDocumentResult(documentResult);
+        setAiDocumentResult(null);
+        setOcrResult(documentResult.aggregated);
         setAiResult(null);
-
-        const parsed = result.parsedInvoice;
-        let amountTTC = parsed.amountTTC;
-        if (!amountTTC && parsed.amountHT) {
-          amountTTC = parsed.amountHT + parsed.tva;
-        }
-        let tva = parsed.tva;
-        if (!tva && amountTTC && parsed.amountHT) {
-          tva = amountTTC - parsed.amountHT;
-        }
-
-        setScannedData({
-          supplier: parsed.supplier || '',
-          invoiceNumber: parsed.invoiceNumber || '',
-          date: parsed.date || new Date().toISOString().split('T')[0],
-          dueDate: parsed.dueDate || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-          amountHT: parsed.amountHT || 0,
-          tva: tva || 0,
-          amountTTC: amountTTC || 0,
-          currency: parsed.currency || 'CHF',
-          category: parsed.category || 'Autres charges',
-          status: 'pending',
-          iban: parsed.iban || '',
-          paymentTerms: parsed.paymentTerms || '30 jours net',
-        });
+        setBestPageNumber(documentResult.bestPageNumber);
+        setScannedData(mapParsedInvoiceToScannedData(documentResult.aggregated.parsedInvoice));
       }
     } catch (err) {
       console.error('Scan error:', err);
-      setScanError(ocrMethod === 'ai-vision' 
-        ? 'Erreur lors de l\'analyse AI Vision. Essayez avec Tesseract OCR en repli.'
-        : 'Erreur lors de l\'analyse OCR.');
+      const message = err instanceof Error ? err.message : null;
+      setScanError(message || (ocrMethod === 'ai-vision'
+        ? 'Erreur lors de l’analyse AI Vision. Essayez avec Tesseract OCR en repli.'
+        : 'Erreur lors de l’analyse OCR.'));
       setScannedData({
         supplier: '',
         invoiceNumber: '',
@@ -136,7 +236,7 @@ export default function InvoiceScan() {
     } finally {
       setScanning(false);
     }
-  }, [file, preprocessOptions, ocrMethod, selectedModel]);
+  }, [cleanupDocumentPages, file, mapParsedInvoiceToScannedData, ocrMethod, preprocessOptions, selectedModel]);
 
   const handleSave = useCallback(() => {
     if (!scannedData) return;
@@ -396,15 +496,60 @@ export default function InvoiceScan() {
           </div>
           <div>
             <p className="text-dark-900 font-medium">Glissez une facture ici ou cliquez pour sélectionner</p>
-            <p className="text-dark-400 text-sm mt-1">Formats acceptés : JPG, PNG, WebP, BMP, TIFF (max 10 Mo)</p>
+            <p className="text-dark-400 text-sm mt-1">Formats acceptés : JPG, PNG, WebP, BMP, TIFF et PDF (max 10 Mo)</p>
           </div>
-          <label className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-gold-500 to-gold-600 text-white rounded-xl text-sm font-medium cursor-pointer btn-premium shadow-soft">
-            <FileText size={16} />
-            Choisir un fichier
-            <input type="file" accept=".jpg,.jpeg,.png,.webp,.bmp,.tiff" onChange={handleFileDrop} className="hidden" />
-          </label>
+          <div className="flex flex-wrap justify-center gap-3">
+            <label className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-gold-500 to-gold-600 text-white rounded-xl text-sm font-medium cursor-pointer btn-premium shadow-soft">
+              <FileText size={16} />
+              Choisir un fichier
+              <input type="file" accept={ACCEPTED_DOCUMENT_TYPES} onChange={handleFileDrop} className="hidden" />
+            </label>
+            <button
+              type="button"
+              onClick={handleTakePhoto}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-dark-900 text-white rounded-xl text-sm font-medium hover:bg-dark-800 transition-colors shadow-soft"
+            >
+              <Camera size={16} />
+              Prendre une photo
+            </button>
+          </div>
         </div>
       </div>
+
+      {cameraError && (
+        <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 flex items-start gap-3">
+          <AlertCircle size={16} className="text-orange-600 mt-0.5 shrink-0" />
+          <p className="text-sm text-orange-800 font-medium">{cameraError}</p>
+        </div>
+      )}
+
+      {cameraActive && (
+        <div className="bg-white rounded-2xl border border-dark-100/50 p-6 space-y-4 shadow-soft">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="font-semibold text-dark-900">Prise de photo</h3>
+              <p className="text-xs text-dark-400 mt-1">Cadrez la facture puis capturez l’image pour l’OCR.</p>
+            </div>
+            <button
+              type="button"
+              onClick={stopCamera}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-dark-200 text-sm text-dark-600 hover:bg-dark-50"
+            >
+              <X size={14} />
+              Fermer
+            </button>
+          </div>
+          <video ref={videoRef} className="w-full max-h-96 rounded-xl bg-dark-900 object-contain" playsInline muted />
+          <button
+            type="button"
+            onClick={handleCapturePhoto}
+            className="inline-flex items-center gap-2 px-5 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition-colors"
+          >
+            <Camera size={16} />
+            Capturer la facture
+          </button>
+        </div>
+      )}
 
       {/* File selected + Preview */}
       {file && !scannedData && (
@@ -426,10 +571,31 @@ export default function InvoiceScan() {
             </button>
           </div>
 
-          {/* Image preview */}
+          {/* Unified document preview */}
           {preview && (
             <div className="border border-dark-100 rounded-lg overflow-hidden bg-dark-50">
-              <img src={preview} alt="Aperçu facture" className="max-h-64 mx-auto object-contain" />
+              {documentKind === 'pdf' ? (
+                <iframe src={preview} title="Aperçu PDF facture" className="w-full h-80 bg-white" />
+              ) : (
+                <img src={preview} alt="Aperçu facture" className="max-h-64 mx-auto object-contain" />
+              )}
+            </div>
+          )}
+
+          {documentPages.length > 0 && (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+              {documentPages.map((page) => (
+                <div
+                  key={page.pageNumber}
+                  className={`border rounded-lg overflow-hidden bg-white ${bestPageNumber === page.pageNumber ? 'border-emerald-400 ring-2 ring-emerald-100' : 'border-dark-100'}`}
+                >
+                  <img src={page.previewUrl} alt={`Page ${page.pageNumber}`} className="h-36 w-full object-contain bg-dark-50" />
+                  <div className="px-3 py-2 text-xs text-dark-600 flex items-center justify-between">
+                    <span>Page {page.pageNumber}</span>
+                    {bestPageNumber === page.pageNumber && <span className="text-emerald-700 font-medium">Meilleure</span>}
+                  </div>
+                </div>
+              ))}
             </div>
           )}
 
@@ -517,6 +683,69 @@ export default function InvoiceScan() {
               </div>
             )}
           </div>
+
+          {documentPages.length > 0 && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <p className="text-sm font-semibold text-dark-900">Pages analysées</p>
+                {bestPageNumber && <p className="text-xs text-emerald-700 font-medium">Extraction principale : page {bestPageNumber}</p>}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                {documentPages.map((page) => {
+                  const tesseractPage = tesseractDocumentResult?.pages.find((item) => item.pageNumber === page.pageNumber);
+                  const aiPage = aiDocumentResult?.pages.find((item) => item.pageNumber === page.pageNumber);
+                  const pageScore = tesseractPage?.score || aiPage?.score;
+                  return (
+                    <button
+                      type="button"
+                      key={page.pageNumber}
+                      onClick={() => {
+                        setBestPageNumber(page.pageNumber);
+                        if (tesseractPage) {
+                          setOcrResult(tesseractPage.result);
+                          setScannedData(mapParsedInvoiceToScannedData(tesseractPage.result.parsedInvoice));
+                        }
+                        if (aiPage) {
+                          setAiResult(aiPage.result);
+                          setScannedData(mapParsedInvoiceToScannedData(aiPage.result.parsedInvoice));
+                        }
+                      }}
+                      className={`text-left border rounded-lg overflow-hidden bg-white transition-all ${bestPageNumber === page.pageNumber ? 'border-emerald-400 ring-2 ring-emerald-100' : 'border-dark-100 hover:border-dark-300'}`}
+                    >
+                      <img src={page.previewUrl} alt={`Page ${page.pageNumber}`} className="h-32 w-full object-contain bg-dark-50" />
+                      <div className="px-3 py-2 text-xs text-dark-600">
+                        <div className="flex items-center justify-between">
+                          <span className="font-medium">Page {page.pageNumber}</span>
+                          {bestPageNumber === page.pageNumber && <span className="text-emerald-700">Sélectionnée</span>}
+                        </div>
+                        {pageScore && <p className="text-[11px] text-dark-400 mt-0.5">Score extraction : {pageScore.toFixed(0)}</p>}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+              {(tesseractDocumentResult || aiDocumentResult) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (tesseractDocumentResult) {
+                      setBestPageNumber(tesseractDocumentResult.bestPageNumber);
+                      setOcrResult(tesseractDocumentResult.aggregated);
+                      setScannedData(mapParsedInvoiceToScannedData(tesseractDocumentResult.aggregated.parsedInvoice));
+                    }
+                    if (aiDocumentResult) {
+                      setBestPageNumber(aiDocumentResult.bestPageNumber);
+                      setAiResult(aiDocumentResult.aggregated);
+                      setScannedData(mapParsedInvoiceToScannedData(aiDocumentResult.aggregated.parsedInvoice));
+                    }
+                  }}
+                  className="inline-flex items-center gap-2 px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 text-xs font-medium text-blue-800 hover:bg-blue-100"
+                >
+                  Fusionner les données de toutes les pages
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Preprocessed Image Preview */}
           {showPreprocessed && ocrResult?.preprocessedPreview && (

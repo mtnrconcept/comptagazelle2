@@ -102,7 +102,7 @@ function filterNoiseLines(lines: string[]): string[] {
 /**
  * Intelligent parser to extract structured invoice data from raw OCR text
  */
-function parseInvoiceText(text: string): ParsedInvoiceData {
+export function parseInvoiceText(text: string): ParsedInvoiceData {
   const rawLines = text.split('\n').map(l => l.trim()).filter(Boolean);
   const cleanLines = filterNoiseLines(rawLines);
   const cleanText = cleanLines.join('\n');
