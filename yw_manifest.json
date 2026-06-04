@@ -1,0 +1,15 @@
+{
+    "project_type": "react",
+    "ai_config": {
+        "invoice_analyzer": {
+            "model": "gemini-2.5-flash",
+            "temperature": 0.1,
+            "description": "Vision-based invoice data extraction from images"
+        },
+        "invoice_analyzer_precise": {
+            "model": "openai-gpt-4o",
+            "temperature": 0.1,
+            "description": "High-precision invoice extraction with GPT-4o vision"
+        }
+    }
+}
