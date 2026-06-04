@@ -10,5 +10,15 @@ export default defineConfig({
   },
   build: {
     sourcemap: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          charts: ['recharts'],
+          'ocr-ai': ['tesseract.js', '@ai-sdk/openai', 'ai'],
+          'ui-vendor': ['framer-motion', 'lucide-react', 'react-dropzone'],
+        },
+      },
+    },
   },
 });
