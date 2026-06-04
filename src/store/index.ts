@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { Transaction, Invoice, Supplier, AccountingCategory, MonthlyData, Alert } from '../types';
+import { Transaction, Invoice, Supplier, AccountingCategory, MonthlyData, Alert, AccountingEntry } from '../types';
+import { entriesFromInvoice, entriesFromTransaction } from '../utils/accounting';
 
 const defaultCategories: AccountingCategory[] = [
   { id: '1', name: 'Chiffre d\'affaires', type: 'revenue', code: '3000' },
@@ -19,6 +20,16 @@ const defaultCategories: AccountingCategory[] = [
   { id: '15', name: 'Matériel', type: 'expense', code: '6600' },
 ];
 
+const replaceSourceEntries = (
+  entries: AccountingEntry[],
+  sourceType: AccountingEntry['sourceType'],
+  sourceId: string,
+  replacements: AccountingEntry[],
+) => [
+  ...entries.filter((entry) => entry.sourceType !== sourceType || entry.sourceId !== sourceId),
+  ...replacements,
+];
+
 interface AppState {
   transactions: Transaction[];
   invoices: Invoice[];
@@ -26,11 +37,14 @@ interface AppState {
   categories: AccountingCategory[];
   alerts: Alert[];
   monthlyData: MonthlyData[];
+  accountingEntries: AccountingEntry[];
+  demoMode: boolean;
   addTransaction: (t: Transaction) => void;
   addTransactions: (ts: Transaction[]) => void;
   addInvoice: (inv: Invoice) => void;
   updateInvoice: (id: string, inv: Partial<Invoice>) => void;
   deleteInvoice: (id: string) => void;
+  setDemoMode: (enabled: boolean) => void;
 }
 
 export const useStore = create<AppState>((set) => ({
@@ -40,13 +54,42 @@ export const useStore = create<AppState>((set) => ({
   categories: defaultCategories,
   alerts: [],
   monthlyData: [],
-  addTransaction: (t) => set((state) => ({ transactions: [...state.transactions, t] })),
-  addTransactions: (ts) => set((state) => ({ transactions: [...state.transactions, ...ts] })),
-  addInvoice: (inv) => set((state) => ({ invoices: [...state.invoices, inv] })),
-  updateInvoice: (id, updates) => set((state) => ({
-    invoices: state.invoices.map((inv) => inv.id === id ? { ...inv, ...updates } : inv),
+  accountingEntries: [],
+  demoMode: false,
+  addTransaction: (transaction) => set((state) => ({
+    transactions: [...state.transactions, transaction],
+    accountingEntries: [
+      ...state.accountingEntries,
+      ...entriesFromTransaction(transaction, state.categories),
+    ],
   })),
+  addTransactions: (transactions) => set((state) => ({
+    transactions: [...state.transactions, ...transactions],
+    accountingEntries: [
+      ...state.accountingEntries,
+      ...transactions.flatMap((transaction) => entriesFromTransaction(transaction, state.categories)),
+    ],
+  })),
+  addInvoice: (invoice) => set((state) => ({
+    invoices: [...state.invoices, invoice],
+    accountingEntries: [
+      ...state.accountingEntries,
+      ...entriesFromInvoice(invoice, state.categories),
+    ],
+  })),
+  updateInvoice: (id, updates) => set((state) => {
+    const invoices = state.invoices.map((invoice) => invoice.id === id ? { ...invoice, ...updates } : invoice);
+    const updatedInvoice = invoices.find((invoice) => invoice.id === id);
+    return {
+      invoices,
+      accountingEntries: updatedInvoice
+        ? replaceSourceEntries(state.accountingEntries, 'invoice', id, entriesFromInvoice(updatedInvoice, state.categories))
+        : state.accountingEntries,
+    };
+  }),
   deleteInvoice: (id) => set((state) => ({
-    invoices: state.invoices.filter((inv) => inv.id !== id),
+    invoices: state.invoices.filter((invoice) => invoice.id !== id),
+    accountingEntries: state.accountingEntries.filter((entry) => entry.sourceType !== 'invoice' || entry.sourceId !== id),
   })),
+  setDemoMode: (enabled) => set({ demoMode: enabled }),
 }));

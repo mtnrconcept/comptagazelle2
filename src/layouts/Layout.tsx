@@ -1,12 +1,13 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
-import { 
-  LayoutDashboard, ArrowRightLeft, FileText, ScanLine, Users, 
+import {
+  LayoutDashboard, ArrowRightLeft, FileText, ScanLine, Users,
   FolderOpen, TrendingUp, Scale, Receipt, Download, Settings,
-  Menu, X, ChevronRight, Sparkles
+  Menu, X, ChevronRight, Sparkles, AlertTriangle, CheckCircle2, Loader2
 } from 'lucide-react';
 import clsx from 'clsx';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useStore } from '../store';
 
 const navItems = [
   { to: '/', icon: LayoutDashboard, label: 'Tableau de bord' },
@@ -25,13 +26,28 @@ const navItems = [
 export default function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const location = useLocation();
+  const { initializePersistence, lastSyncedAt, persistenceError, persistenceStatus } = useStore();
+
+  useEffect(() => {
+    void initializePersistence();
+  }, [initializePersistence]);
+
+  const syncLabel = persistenceStatus === 'loading'
+    ? 'Chargement local'
+    : persistenceStatus === 'syncing'
+      ? 'Sauvegarde…'
+      : persistenceStatus === 'error'
+        ? 'Sauvegarde en erreur'
+        : lastSyncedAt
+          ? `Sauvegardé ${new Intl.DateTimeFormat('fr-CH', { hour: '2-digit', minute: '2-digit' }).format(new Date(lastSyncedAt))}`
+          : 'Sauvegarde locale';
 
   return (
     <div className="flex h-screen bg-offwhite bg-texture overflow-hidden">
       {/* Mobile overlay */}
       <AnimatePresence>
         {sidebarOpen && (
-          <motion.div 
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -76,8 +92,8 @@ export default function Layout() {
                   onClick={() => setSidebarOpen(false)}
                   className={({ isActive }) => clsx(
                     'flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-[13px] font-medium transition-all duration-200 group relative',
-                    isActive 
-                      ? 'bg-gradient-to-r from-gold-500/15 to-gold-500/5 text-gold-300 nav-active-indicator' 
+                    isActive
+                      ? 'bg-gradient-to-r from-gold-500/15 to-gold-500/5 text-gold-300 nav-active-indicator'
                       : 'text-dark-400 hover:text-white hover:bg-white/[0.04]'
                   )}
                 >
@@ -103,13 +119,33 @@ export default function Layout() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Top bar */}
         <header className="h-[68px] bg-white/80 backdrop-blur-md border-b border-dark-100/50 flex items-center px-4 lg:px-8 shrink-0 sticky top-0 z-30">
-          <button 
+          <button
             className="lg:hidden p-2.5 -ml-2 rounded-xl hover:bg-dark-50 active:scale-95 transition-all"
             onClick={() => setSidebarOpen(true)}
           >
             <Menu size={20} />
           </button>
           <div className="ml-auto flex items-center gap-5">
+            <div
+              title={persistenceError ?? 'Données comptables synchronisées dans le coffre local chiffré'}
+              className={clsx(
+                'hidden md:flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold',
+                persistenceStatus === 'error'
+                  ? 'border-red-200 bg-red-50 text-red-700'
+                  : persistenceStatus === 'loading' || persistenceStatus === 'syncing'
+                    ? 'border-gold-200 bg-gold-50 text-gold-700'
+                    : 'border-emerald-200 bg-emerald-50 text-emerald-700'
+              )}
+            >
+              {persistenceStatus === 'error' ? (
+                <AlertTriangle size={14} />
+              ) : persistenceStatus === 'loading' || persistenceStatus === 'syncing' ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <CheckCircle2 size={14} />
+              )}
+              <span>{syncLabel}</span>
+            </div>
             <div className="hidden sm:flex items-center gap-2 text-sm">
               <span className="text-dark-400 font-normal">Restaurant</span>
               <span className="text-dark-900 font-semibold">La Gazelle d'Or</span>

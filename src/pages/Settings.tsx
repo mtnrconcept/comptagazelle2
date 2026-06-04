@@ -1,11 +1,31 @@
 import { Shield, Users, Lock, Clock, Database, Bell } from 'lucide-react';
+import { useStore } from '../store';
 
 export default function Settings() {
+  const { demoMode, setDemoMode } = useStore();
+
   return (
     <div className="space-y-7">
       <div>
         <h1 className="text-3xl font-bold text-dark-900 tracking-tight">Paramètres</h1>
         <p className="text-dark-400 text-sm mt-1.5 font-medium">Configuration de l'application</p>
+      </div>
+
+
+      <div className="bg-white rounded-2xl border border-dark-100/50 p-6 shadow-soft">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="font-semibold text-dark-900">Mode démo</h3>
+            <p className="text-sm text-dark-500 mt-1">Les pages de reporting excluent les écritures marquées comme démo tant que ce mode n’est pas activé explicitement.</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDemoMode(!demoMode)}
+            className={`px-4 py-2 rounded-xl text-sm font-medium transition-colors ${demoMode ? 'bg-gold-500 text-white' : 'bg-dark-100 text-dark-700'}`}
+          >
+            {demoMode ? 'Démo activée' : 'Démo désactivée'}
+          </button>
+        </div>
       </div>
 
       {/* Restaurant Info */}

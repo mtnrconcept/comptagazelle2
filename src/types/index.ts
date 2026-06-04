@@ -1,5 +1,10 @@
 // Types for Gazelle Comptabilité
 
+export interface Period {
+  start: string;
+  end: string;
+}
+
 export interface Transaction {
   id: string;
   date: string;
@@ -69,6 +74,21 @@ export interface MonthlyData {
   profit: number;
 }
 
+export interface AccountingEntry {
+  id: string;
+  date: string;
+  description: string;
+  accountCode: string;
+  accountName: string;
+  debit: number;
+  credit: number;
+  category: string;
+  sourceType: 'transaction' | 'invoice' | 'manual' | 'demo';
+  sourceId: string;
+  validated: boolean;
+  demo?: boolean;
+}
+
 export interface BalanceSheet {
   assets: {
     bank: number;
@@ -76,6 +96,7 @@ export interface BalanceSheet {
     receivables: number;
     stock: number;
     fixedAssets: number;
+    vatRecoverable: number;
   };
   liabilities: {
     supplierDebts: number;
@@ -95,6 +116,23 @@ export interface VATReport {
   collected: number;
   deductible: number;
   netPayable: number;
+}
+
+export interface IncomeStatementReport {
+  revenue: number;
+  purchases: number;
+  grossMargin: number;
+  personnel: number;
+  fixedCharges: number;
+  variableCharges: number;
+  ebitda: number;
+  netResult: number;
+}
+
+export interface ReportDataQuality {
+  complete: boolean;
+  validated: boolean;
+  issues: string[];
 }
 
 export interface Alert {

@@ -179,10 +179,6 @@ export default function VATPage() {
           <h1 className="text-3xl font-bold text-dark-900 tracking-tight">TVA</h1>
           <p className="text-dark-400 text-sm mt-1.5 font-medium">Gestion de la TVA suisse — agrégation par facture, période, taux et validation</p>
         </div>
-        <button className="inline-flex items-center gap-2 px-5 py-2.5 bg-dark-900 text-white rounded-xl text-sm font-medium hover:bg-dark-800 transition-all shadow-soft">
-          <Download size={16} />
-          Rapport TVA
-        </button>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
