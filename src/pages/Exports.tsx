@@ -2,11 +2,11 @@ import { Download, FileSpreadsheet, FileText, FolderArchive } from 'lucide-react
 import { useStore } from '../store';
 
 export default function Exports() {
-  const { transactions, invoices } = useStore();
+  const { exportBackup, invoices, transactions } = useStore();
 
   const handleExportCSV = () => {
     const headers = 'Date;Description;Montant;Type;Catégorie;Référence;Rapproché\n';
-    const rows = transactions.map(t => 
+    const rows = transactions.map(t =>
       `${t.date};${t.description};${t.type === 'debit' ? '-' : ''}${t.amount};${t.type};${t.category};${t.reference || ''};${t.reconciled ? 'Oui' : 'Non'}`
     ).join('\n');
     const csv = headers + rows;
@@ -29,7 +29,7 @@ export default function Exports() {
     const rent = transactions.filter(t => t.type === 'debit' && t.category === 'Loyer').reduce((s, t) => s + t.amount, 0);
     const exploitation = transactions.filter(t => t.type === 'debit' && t.category === 'Charges exploitation').reduce((s, t) => s + t.amount, 0);
     const insurance = transactions.filter(t => t.type === 'debit' && t.category === 'Assurances').reduce((s, t) => s + t.amount, 0);
-    
+
     const content = `COMPTE DE RÉSULTAT - La Gazelle d'Or
 Période: Mai 2026
 
@@ -45,7 +45,7 @@ RÉSULTAT NET: CHF ${(revenue - purchases - personnel - rent - exploitation - in
 ---
 Document généré automatiquement par Gazelle Comptabilité.
 Les données doivent être vérifiées par une personne compétente avant déclaration officielle.`;
-    
+
     downloadFile(content, 'compte_resultat_mai2026.txt', 'text/plain');
   };
 
@@ -58,30 +58,42 @@ Les données doivent être vérifiées par une personne compétente avant décla
     URL.revokeObjectURL(link.href);
   };
 
+
+  const handleExportBackup = () => {
+    downloadFile(exportBackup(), `sauvegarde_gazelle_${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
+  };
+
   const exports = [
-    { 
-      label: 'Transactions (CSV)', 
+    {
+      label: 'Sauvegarde complète (JSON)',
+      desc: 'Coffre de secours contenant factures, transactions, fournisseurs, catégories, pièces jointes et journaux',
+      icon: FolderArchive,
+      action: handleExportBackup,
+      color: 'bg-red-50 text-red-600'
+    },
+    {
+      label: 'Transactions (CSV)',
       desc: 'Export de toutes les transactions bancaires au format CSV',
       icon: FileSpreadsheet,
       action: handleExportCSV,
       color: 'bg-emerald-50 text-emerald-600'
     },
-    { 
-      label: 'Factures (CSV)', 
+    {
+      label: 'Factures (CSV)',
       desc: 'Export de toutes les factures avec détails fournisseurs',
       icon: FileSpreadsheet,
       action: handleExportInvoicesCSV,
       color: 'bg-blue-50 text-blue-600'
     },
-    { 
-      label: 'Compte de résultat', 
+    {
+      label: 'Compte de résultat',
       desc: 'Export du compte de résultat estimé au format texte',
       icon: FileText,
       action: handleExportIncomeStatement,
       color: 'bg-gold-50 text-gold-600'
     },
-    { 
-      label: 'Export fiduciaire', 
+    {
+      label: 'Export fiduciaire',
       desc: 'Package complet pour transmission à votre fiduciaire',
       icon: FolderArchive,
       action: handleExportCSV,
@@ -106,7 +118,7 @@ Les données doivent être vérifiées par une personne compétente avant décla
               <div className="flex-1">
                 <h3 className="font-semibold text-dark-900">{exp.label}</h3>
                 <p className="text-sm text-dark-500 mt-1">{exp.desc}</p>
-                <button 
+                <button
                   onClick={exp.action}
                   className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-dark-900 text-white rounded-xl text-sm font-medium hover:bg-dark-800 transition-all btn-premium"
                 >
@@ -121,6 +133,11 @@ Les données doivent être vérifiées par une personne compétente avant décla
 
       <div className="bg-dark-50 rounded-lg p-4 text-sm text-dark-600">
         <p>💡 <strong>Conseil :</strong> Pour une comptabilité officielle, transmettez régulièrement vos exports à votre fiduciaire pour validation et déclaration.</p>
+      </div>
+
+      <div className="bg-gold-50/80 border border-gold-200 rounded-xl p-4 text-sm text-gold-800">
+        <p className="font-semibold">Stratégie anti-perte de données</p>
+        <p className="mt-1">Téléchargez la sauvegarde complète JSON après chaque session de saisie et conservez une copie hors de cet appareil. Elle permet de restaurer toutes les tables persistantes du MVP local.</p>
       </div>
     </div>
   );

@@ -2,15 +2,17 @@ import { useStore } from '../store';
 import { Download } from 'lucide-react';
 
 export default function IncomeStatement() {
-  const { transactions } = useStore();
+  const { accountingEntries } = useStore();
 
-  const revenue = transactions.filter(t => t.type === 'credit').reduce((s, t) => s + t.amount, 0);
-  const purchases = transactions.filter(t => t.type === 'debit' && t.category === 'Achats marchandises').reduce((s, t) => s + t.amount, 0);
+  const lines = accountingEntries.flatMap((entry) => entry.lines.map((line) => ({ ...line, entryStatus: entry.status })));
+  const revenue = lines.filter((line) => line.accountCode.startsWith('3')).reduce((s, line) => s + line.credit - line.debit, 0);
+  const purchases = lines.filter((line) => ['4000', '4100', '4200'].includes(line.accountCode)).reduce((s, line) => s + line.debit - line.credit, 0);
   const grossMargin = revenue - purchases;
-  const personnel = transactions.filter(t => t.type === 'debit' && t.category === 'Charges personnel').reduce((s, t) => s + t.amount, 0);
-  const rent = transactions.filter(t => t.type === 'debit' && t.category === 'Loyer').reduce((s, t) => s + t.amount, 0);
-  const exploitation = transactions.filter(t => t.type === 'debit' && t.category === 'Charges exploitation').reduce((s, t) => s + t.amount, 0);
-  const insurance = transactions.filter(t => t.type === 'debit' && t.category === 'Assurances').reduce((s, t) => s + t.amount, 0);
+  const personnel = lines.filter((line) => line.accountCode.startsWith('5')).reduce((s, line) => s + line.debit - line.credit, 0);
+  const rent = lines.filter((line) => line.accountCode === '6000').reduce((s, line) => s + line.debit - line.credit, 0);
+  const exploitation = lines.filter((line) => line.accountCode.startsWith('61')).reduce((s, line) => s + line.debit - line.credit, 0);
+  const insurance = lines.filter((line) => line.accountCode === '6300').reduce((s, line) => s + line.debit - line.credit, 0);
+  const pendingEntries = accountingEntries.filter((entry) => entry.status === 'to_validate').length;
   const fixedCharges = rent + insurance;
   const variableCharges = exploitation;
   const ebitda = grossMargin - personnel - fixedCharges - variableCharges;
@@ -34,7 +36,7 @@ export default function IncomeStatement() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-dark-900 tracking-tight">Compte de résultat</h1>
-          <p className="text-dark-400 text-sm mt-1.5 font-medium">Période : Mai 2026 (estimé)</p>
+          <p className="text-dark-400 text-sm mt-1.5 font-medium">Période : Mai 2026 · basé sur les écritures</p>
         </div>
         <button className="inline-flex items-center gap-2 px-5 py-2.5 bg-dark-900 text-white rounded-xl text-sm font-medium hover:bg-dark-800 transition-all shadow-soft hover:shadow-card">
           <Download size={16} />
@@ -67,7 +69,7 @@ export default function IncomeStatement() {
 
       <div className="bg-gold-50/80 border border-gold-200 rounded-xl p-4 text-sm text-gold-800">
         <p className="font-medium">⚠️ Estimation automatique</p>
-        <p className="mt-1">Ce compte de résultat est généré automatiquement à partir des transactions enregistrées. Les données comptables doivent être vérifiées par une personne compétente avant déclaration officielle.</p>
+        <p className="mt-1">Ce compte de résultat est généré automatiquement à partir des écritures comptables, dont {pendingEntries} à valider. Les données comptables doivent être vérifiées par une personne compétente avant déclaration officielle.</p>
       </div>
     </div>
   );

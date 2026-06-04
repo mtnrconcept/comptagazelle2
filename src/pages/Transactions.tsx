@@ -5,7 +5,7 @@ import { Transaction } from '../types';
 import clsx from 'clsx';
 
 export default function Transactions() {
-  const { transactions, addTransactions } = useStore();
+  const { transactions, accountingEntries, addTransactions } = useStore();
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'credit' | 'debit'>('all');
 
@@ -42,11 +42,29 @@ export default function Transactions() {
     e.target.value = '';
   }, [addTransactions]);
 
-  const filtered = transactions
+  const entryRows = accountingEntries.map((entry) => {
+    const debits = entry.lines.reduce((sum, line) => sum + line.debit, 0);
+    const credits = entry.lines.reduce((sum, line) => sum + line.credit, 0);
+    const transaction = transactions.find((t) => t.id === entry.transactionId);
+    return {
+      id: entry.id,
+      date: entry.date,
+      description: entry.description,
+      amount: Math.max(debits, credits),
+      type: transaction?.type || (credits > debits ? 'credit' : 'debit'),
+      category: entry.categoryName || transaction?.category || 'Non classée',
+      reference: entry.reference || transaction?.reference,
+      status: entry.status,
+      accounts: entry.lines.map((line) => line.accountCode).join(' / '),
+    };
+  });
+
+  const filtered = entryRows
     .filter(t => filterType === 'all' || t.type === filterType)
     .filter(t => 
       t.description.toLowerCase().includes(search.toLowerCase()) ||
       t.category.toLowerCase().includes(search.toLowerCase()) ||
+      t.accounts.includes(search) ||
       t.reference?.toLowerCase().includes(search.toLowerCase())
     )
     .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
@@ -56,7 +74,7 @@ export default function Transactions() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
           <h1 className="text-3xl font-bold text-dark-900 tracking-tight">Transactions bancaires</h1>
-          <p className="text-dark-400 text-sm mt-1.5 font-medium">{transactions.length} transactions enregistrées</p>
+          <p className="text-dark-400 text-sm mt-1.5 font-medium">{accountingEntries.length} écritures comptables enregistrées</p>
         </div>
         <label className="inline-flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-gold-500 to-gold-600 text-white rounded-xl text-sm font-medium cursor-pointer btn-premium shadow-soft">
           <Upload size={16} />
@@ -112,7 +130,8 @@ export default function Transactions() {
                 <th className="text-left px-4 py-3 font-semibold text-dark-600">Description</th>
                 <th className="text-left px-4 py-3 font-semibold text-dark-600">Catégorie</th>
                 <th className="text-right px-4 py-3 font-semibold text-dark-600">Montant</th>
-                <th className="text-center px-4 py-3 font-semibold text-dark-600">Statut</th>
+                <th className="text-left px-4 py-3 font-semibold text-dark-600">Comptes</th>
+                <th className="text-center px-4 py-3 font-semibold text-dark-600">Revue</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-dark-50">
@@ -129,12 +148,13 @@ export default function Transactions() {
                   )}>
                     {t.type === 'credit' ? '+' : '-'}{formatCHF(t.amount)}
                   </td>
+                  <td className="px-4 py-3 text-dark-500 font-mono text-xs">{t.accounts}</td>
                   <td className="px-4 py-3 text-center">
                     <span className={clsx(
                       'text-xs px-2 py-1 rounded-full font-medium',
-                      t.reconciled ? 'bg-emerald-100 text-emerald-700' : 'bg-orange-100 text-orange-700'
+                      t.status === 'to_validate' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'
                     )}>
-                      {t.reconciled ? 'Rapproché' : 'Non rapproché'}
+                      {t.status === 'to_validate' ? 'À valider' : t.status === 'exported' ? 'Exportée' : 'Validée'}
                     </span>
                   </td>
                 </tr>

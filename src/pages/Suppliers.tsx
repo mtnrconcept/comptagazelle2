@@ -4,11 +4,28 @@ import { Search } from 'lucide-react';
 import { useStore } from '../store';
 
 export default function Suppliers() {
-  const { suppliers } = useStore();
+  const { suppliers, accountingEntries } = useStore();
   const [search, setSearch] = useState('');
   const formatCHF = (v: number) => new Intl.NumberFormat('fr-CH', { style: 'currency', currency: 'CHF' }).format(v);
 
-  const filtered = suppliers.filter(s => 
+  const supplierCards = suppliers.map((supplier) => {
+    const entries = accountingEntries.filter((entry) => entry.supplierId === supplier.id);
+    const totalAmount = entries.reduce((sum, entry) => (
+      sum + entry.lines.filter((line) => line.kind === 'ttc').reduce((lineSum, line) => lineSum + line.credit, 0)
+    ), 0);
+    const category = entries[0]?.categoryName || supplier.category;
+    const pendingEntries = entries.filter((entry) => entry.status === 'to_validate').length;
+
+    return {
+      ...supplier,
+      category,
+      invoiceCount: entries.length || supplier.invoiceCount,
+      totalAmount: totalAmount || supplier.totalAmount,
+      pendingEntries,
+    };
+  });
+
+  const filtered = supplierCards.filter(s => 
     s.name.toLowerCase().includes(search.toLowerCase()) ||
     s.category.toLowerCase().includes(search.toLowerCase())
   );
@@ -20,7 +37,7 @@ export default function Suppliers() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-dark-900">Fournisseurs</h1>
-        <p className="text-dark-500 text-sm mt-1">{suppliers.length} fournisseurs enregistrés</p>
+        <p className="text-dark-500 text-sm mt-1">{suppliers.length} fournisseurs enregistrés · totaux calculés depuis les écritures</p>
       </div>
 
       {hasSuppliers && (
