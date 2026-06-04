@@ -70,6 +70,11 @@ Les données doivent être vérifiées par une personne compétente avant décla
     URL.revokeObjectURL(link.href);
   };
 
+
+  const handleExportBackup = () => {
+    downloadFile(exportBackup(), `sauvegarde_gazelle_${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
+  };
+
   const exports = [
     {
       label: 'Écritures comptables (CSV)',
@@ -145,6 +150,11 @@ Les données doivent être vérifiées par une personne compétente avant décla
 
       <div className="bg-dark-50 rounded-lg p-4 text-sm text-dark-600">
         <p>💡 <strong>Conseil :</strong> Pour une comptabilité officielle, transmettez régulièrement vos exports à votre fiduciaire pour validation et déclaration.</p>
+      </div>
+
+      <div className="bg-gold-50/80 border border-gold-200 rounded-xl p-4 text-sm text-gold-800">
+        <p className="font-semibold">Stratégie anti-perte de données</p>
+        <p className="mt-1">Téléchargez la sauvegarde complète JSON après chaque session de saisie et conservez une copie hors de cet appareil. Elle permet de restaurer toutes les tables persistantes du MVP local.</p>
       </div>
     </div>
   );
